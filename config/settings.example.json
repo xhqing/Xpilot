@@ -1,0 +1,27 @@
+{
+  "xray_bin": "/usr/local/bin/xray",
+  "socks_port": 1080,
+  "http_port": 1087,
+  "log_level": "warning",
+  "log_file": "/tmp/xray-pilot.log",
+  "auto_switch": {
+    "enabled": true,
+    "interval": 300,
+    "strategy": "latency",
+    "threshold": 200
+  },
+  "watchdog": {
+    "enabled": true,
+    "interval": 30,
+    "max_retries": 3,
+    "retry_delay": 5
+  },
+  "subscription": {
+    "auto_update": false,
+    "update_interval": 3600
+  },
+  "system_proxy": {
+    "enabled": true,
+    "bypass_local": true
+  }
+}

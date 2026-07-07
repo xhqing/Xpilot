@@ -1,0 +1,59 @@
+{
+  "default_node": "node1",
+  "groups": {
+    "default": "默认分组"
+  },
+  "nodes": {
+    "node1": {
+      "protocol": "ss",
+      "port": 8388,
+      "password": "YOUR_SS_PASSWORD",
+      "security": "aes-256-gcm",
+      "network": "tcp",
+      "tls": false,
+      "servername": "",
+      "alterId": 0,
+      "status": "active",
+      "group": "default",
+      "latency": 0,
+      "last_check": "",
+      "id": "node1",
+      "name": "示例-SS节点",
+      "address": "ss.example.com"
+    },
+    "node2": {
+      "protocol": "vmess",
+      "port": 443,
+      "uuid": "00000000-0000-0000-0000-000000000000",
+      "alterId": 0,
+      "security": "auto",
+      "network": "tcp",
+      "tls": true,
+      "servername": "",
+      "status": "active",
+      "group": "default",
+      "latency": 0,
+      "last_check": "",
+      "id": "node2",
+      "name": "示例-VMess节点",
+      "address": "vmess.example.com"
+    },
+    "node3": {
+      "protocol": "trojan",
+      "port": 443,
+      "password": "YOUR_TROJAN_PASSWORD",
+      "security": "none",
+      "network": "tcp",
+      "tls": true,
+      "servername": "",
+      "alterId": 0,
+      "status": "active",
+      "group": "default",
+      "latency": 0,
+      "last_check": "",
+      "id": "node3",
+      "name": "示例-Trojan节点",
+      "address": "trojan.example.com"
+    }
+  }
+}

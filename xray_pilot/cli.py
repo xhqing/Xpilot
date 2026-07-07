@@ -1,0 +1,928 @@
+"""CLI entry point for Xray Pilot."""
+
+import os
+import signal
+import subprocess
+import sys
+import time
+import logging
+import platform
+import click
+
+from .config import Config, ConfigError
+from .utils import get_config_dir
+
+
+def setup_logging(log_level='warning'):
+    """Configure logging."""
+    level = getattr(logging, log_level.upper(), logging.WARNING)
+    logging.basicConfig(
+        level=level,
+        format='%(asctime)s [%(levelname)s] %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+
+
+AUTO_SWITCH_PID_FILE = '/tmp/xray-pilot-auto-switch.pid'
+LAUNCHD_LABEL = 'com.xray-pilot.monitor'
+LAUNCHD_PLIST_PATH = os.path.expanduser(
+    f'~/Library/LaunchAgents/{LAUNCHD_LABEL}.plist'
+)
+
+
+def _stop_monitor_daemon():
+    """Stop the background auto-switch monitor daemon if running."""
+    if not os.path.exists(AUTO_SWITCH_PID_FILE):
+        return
+    try:
+        with open(AUTO_SWITCH_PID_FILE, 'r') as f:
+            pid = int(f.read().strip())
+        try:
+            os.kill(pid, signal.SIGTERM)
+            time.sleep(0.5)
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+        except OSError:
+            pass
+        os.remove(AUTO_SWITCH_PID_FILE)
+    except Exception as e:
+        click.echo(f'Warning: failed to stop monitor daemon: {e}', err=True)
+
+
+def _spawn_monitor_daemon():
+    """Spawn a background process that runs the auto-switch monitor loop.
+
+    This avoids blocking the CLI command (e.g. when run by an agent/IDE) while
+    keeping the watchdog alive after the command returns.
+    """
+    _stop_monitor_daemon()
+    cmd = [sys.executable, '-m', 'xray_pilot.cli', 'monitor']
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True
+        )
+        click.echo(f'Auto-switch monitor running in background (PID: {proc.pid})')
+        return proc.pid
+    except Exception as e:
+        click.echo(f'Failed to spawn monitor daemon: {e}', err=True)
+        raise
+
+
+def get_managers():
+    """Initialize and return all manager instances."""
+    config = Config()
+    from .node_manager import NodeManager
+    from .routing_manager import RoutingManager
+    from .proxy_manager import ProxyManager
+    from .health_checker import HealthChecker
+    from .auto_switch import AutoSwitch
+
+    node_manager = NodeManager(config)
+    routing_manager = RoutingManager(config)
+    proxy_manager = ProxyManager(config, node_manager, routing_manager)
+    health_checker = HealthChecker(proxy_manager)
+    health_checker.set_node_manager(node_manager)
+    auto_switch = AutoSwitch(config, node_manager, health_checker, proxy_manager)
+
+    return config, node_manager, routing_manager, proxy_manager, health_checker, auto_switch
+
+
+@click.group()
+@click.version_option(version='0.1.0', prog_name='xray-pilot')
+def cli():
+    """Xray Pilot - A CLI proxy management tool with xray backend."""
+    pass
+
+
+# ==================== Init Command ====================
+
+@cli.command()
+@click.option('-f', '--force', is_flag=True, help='Force overwrite existing configs')
+def init(force):
+    """Initialize configuration files."""
+    config = Config()
+    try:
+        created = config.init_default_configs(force=force)
+        if created:
+            click.echo(f'Created config files: {", ".join(created)}')
+        else:
+            click.echo('Config files already exist. Use -f to force overwrite.')
+        click.echo(f'Config directory: {config.config_dir}')
+    except ConfigError as e:
+        click.echo(f'Error: {e}', err=True)
+        sys.exit(1)
+
+
+# ==================== Start/Stop/Restart/Status Commands ====================
+
+@cli.command()
+@click.argument('node', required=False)
+@click.option('-b', '--background', is_flag=True, help='Run auto-switch monitor in background')
+def start(node, background):
+    """Start proxy service."""
+    setup_logging()
+    _, node_manager, _, proxy_manager, health_checker, auto_switch = get_managers()
+    try:
+        if node is None:
+            # Auto-select fastest node
+            click.echo('Auto-selecting fastest node...')
+            nodes = node_manager.list_nodes()
+            best_node = None
+            best_latency = float('inf')
+            for n in nodes:
+                try:
+                    lat = health_checker.check_latency(n, timeout=3)
+                    click.echo(f'  {n["id"]}: {lat}ms')
+                    if lat < best_latency:
+                        best_latency = lat
+                        best_node = n['id']
+                except Exception:
+                    click.echo(f'  {n["id"]}: timeout')
+            if best_node:
+                node = best_node
+                click.echo(click.style(f'Selected fastest node: {node} ({best_latency:.0f}ms)', fg='green'))
+            else:
+                click.echo('No available node found, using default', err=True)
+                sys.exit(1)
+        
+        node_name = proxy_manager.start(node)
+        click.echo(click.style(f'Proxy started (node: {node_name})', fg='green'))
+        
+        # When run by an agent/IDE (non-tty) or with --background, spawn a
+        # detached monitor process so the CLI command can return immediately
+        # while the watchdog keeps running.
+        if background or not sys.stdout.isatty():
+            _spawn_monitor_daemon()
+        else:
+            # Interactive mode: keep the monitor in-process so Ctrl+C stops it.
+            auto_switch.start()
+            if auto_switch._running:
+                click.echo('Auto-switch is running. Press Ctrl+C to stop.')
+                try:
+                    while True:
+                        time.sleep(1)
+                except KeyboardInterrupt:
+                    click.echo('\nStopping proxy...')
+                    proxy_manager.stop()
+                    auto_switch.stop()
+    except Exception as e:
+        click.echo(f'Failed to start proxy: {e}', err=True)
+        sys.exit(1)
+
+
+@cli.command()
+def stop():
+    """Stop proxy service and background monitor daemon."""
+    setup_logging()
+    _, _, _, proxy_manager, _, _ = get_managers()
+    try:
+        _stop_monitor_daemon()
+        proxy_manager.stop()
+        click.echo('Proxy stopped')
+    except Exception as e:
+        click.echo(f'Failed to stop proxy: {e}', err=True)
+        sys.exit(1)
+
+
+@cli.command()
+@click.option('-b', '--background', is_flag=True, help='Run auto-switch monitor in background')
+def restart(background):
+    """Restart proxy service."""
+    setup_logging()
+    _, node_manager, _, proxy_manager, health_checker, auto_switch = get_managers()
+    try:
+        # Auto-select fastest node
+        click.echo('Auto-selecting fastest node...')
+        nodes = node_manager.list_nodes()
+        best_node = None
+        best_latency = float('inf')
+        for n in nodes:
+            try:
+                lat = health_checker.check_latency(n, timeout=3)
+                click.echo(f'  {n["id"]}: {lat}ms')
+                if lat < best_latency:
+                    best_latency = lat
+                    best_node = n['id']
+            except Exception:
+                click.echo(f'  {n["id"]}: timeout')
+        if best_node:
+            node = best_node
+            click.echo(click.style(f'Selected fastest node: {node} ({best_latency:.0f}ms)', fg='green'))
+            proxy_manager.stop()
+            proxy_manager.start(node)
+            click.echo(click.style(f'Proxy restarted (node: {node})', fg='green'))
+        else:
+            proxy_manager.restart()
+            click.echo('Proxy restarted (no node available)')
+        
+        # When run by an agent/IDE (non-tty) or with --background, spawn a
+        # detached monitor process so the CLI command can return immediately
+        # while the watchdog keeps running.
+        if background or not sys.stdout.isatty():
+            _spawn_monitor_daemon()
+        else:
+            # Interactive mode: keep the monitor in-process so Ctrl+C stops it.
+            auto_switch.start()
+            if auto_switch._running:
+                click.echo('Auto-switch is running. Press Ctrl+C to stop.')
+                try:
+                    while True:
+                        time.sleep(1)
+                except KeyboardInterrupt:
+                    click.echo('\nStopping proxy...')
+                    proxy_manager.stop()
+                    auto_switch.stop()
+    except Exception as e:
+        click.echo(f'Failed to restart proxy: {e}', err=True)
+        sys.exit(1)
+
+
+@cli.command()
+def monitor():
+    """Run the auto-switch monitor loop (internal background daemon)."""
+    setup_logging()
+    _, _, _, proxy_manager, _, auto_switch = get_managers()
+    try:
+        with open(AUTO_SWITCH_PID_FILE, 'w') as f:
+            f.write(str(os.getpid()))
+
+        auto_switch.start()
+        if auto_switch._running:
+            try:
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                click.echo('\nStopping monitor...')
+                auto_switch.stop()
+                proxy_manager.stop()
+        else:
+            click.echo('Auto-switch is disabled, exiting.')
+    except Exception as e:
+        click.echo(f'Failed to start monitor: {e}', err=True)
+        sys.exit(1)
+
+
+@cli.command()
+@click.option('-v', '--verbose', is_flag=True, help='Show detailed status')
+def status(verbose):
+    """Show proxy service status."""
+    _, _, _, proxy_manager, _, _ = get_managers()
+    try:
+        info = proxy_manager.get_status()
+        if info['running']:
+            click.echo(click.style('Running', fg='green'))
+            click.echo(f'  PID: {info["pid"]}')
+            click.echo(f'  Current node: {info.get("node_name", "")} ({info["current_node"]})')
+            click.echo(f'  SOCKS port: {info.get("socks_port", "N/A")}')
+            click.echo(f'  HTTP port: {info.get("http_port", "N/A")}')
+        else:
+            click.echo(click.style('Stopped', fg='red'))
+            if info.get('current_node'):
+                click.echo(f'  Last used node: {info["current_node"]}')
+    except Exception as e:
+        click.echo(f'Error getting status: {e}', err=True)
+        sys.exit(1)
+
+
+@cli.command()
+@click.argument('node')
+def switch(node):
+    """Switch to a different node."""
+    setup_logging()
+    _, node_manager, _, proxy_manager, _, _ = get_managers()
+    try:
+        # Validate node exists
+        node_manager.get_node(node)
+        was_running = proxy_manager.is_running()
+        if was_running:
+            proxy_manager.stop()
+        proxy_manager.start(node)
+        node_manager.set_default_node(node)
+        click.echo(f'Switched to node: {node}')
+    except Exception as e:
+        click.echo(f'Failed to switch: {e}', err=True)
+        sys.exit(1)
+
+
+# ==================== Node Management Commands ====================
+
+@cli.group()
+def node():
+    """Node management commands."""
+    pass
+
+
+@node.command('list')
+@click.option('-g', '--group', default=None, help='Filter by group')
+def node_list(group):
+    """List all nodes."""
+    _, node_manager, _, _, _, _ = get_managers()
+    try:
+        nodes = node_manager.list_nodes(filter_group=group)
+        if not nodes:
+            click.echo('No nodes found.')
+            return
+
+        default_node = node_manager.get_default_node()
+        for n in nodes:
+            marker = '* ' if n['id'] == default_node else '  '
+            latency = f'{n.get("latency", 0)}ms' if n.get('latency', 0) > 0 else 'N/A'
+            dl = n.get('download_speed')
+            ul = n.get('upload_speed')
+            speed_info = ''
+            if dl or ul:
+                dl_str = f'{dl}Mbps' if dl else 'N/A'
+                ul_str = f'{ul}Mbps' if ul else 'N/A'
+                speed_info = f' [DL: {dl_str} | UL: {ul_str}]'
+            click.echo(f'{marker}{n["id"]}: {n["name"]} [{n["protocol"]}] '
+                       f'{n["address"]}:{n["port"]} - {latency}{speed_info}')
+    except Exception as e:
+        click.echo(f'Error: {e}', err=True)
+        sys.exit(1)
+
+
+@node.command('add')
+@click.option('--name', required=True, help='Node name')
+@click.option('--protocol', required=True, type=click.Choice(['vmess', 'vless', 'trojan', 'ss']),
+              help='Protocol type')
+@click.option('--address', required=True, help='Server address')
+@click.option('--port', required=True, type=int, help='Server port')
+@click.option('--uuid', default=None, help='UUID (for VLess/VMess)')
+@click.option('--password', default=None, help='Password (for Trojan/SS)')
+@click.option('--alter-id', default=0, type=int, help='AlterID (for VMess)')
+@click.option('--security', default='auto', help='Security/encryption method')
+@click.option('--network', default='tcp', help='Network transport (tcp/ws/h2/grpc)')
+@click.option('--tls', is_flag=True, help='Enable TLS')
+@click.option('--servername', default=None, help='TLS server name (SNI)')
+@click.option('--group', default='default', help='Group name')
+def node_add(name, protocol, address, port, uuid, password, alter_id, security,
+             network, tls, servername, group):
+    """Add a new node."""
+    _, node_manager, _, _, _, _ = get_managers()
+    try:
+        node_info = {
+            'name': name,
+            'protocol': protocol,
+            'address': address,
+            'port': port,
+            'uuid': uuid,
+            'password': password,
+            'alterId': alter_id,
+            'security': security,
+            'network': network,
+            'tls': tls,
+            'servername': servername or address,
+            'group': group,
+        }
+        node_id = node_manager.add_node(node_info)
+        click.echo(f'Node added: {node_id} ({name})')
+    except Exception as e:
+        click.echo(f'Failed to add node: {e}', err=True)
+        sys.exit(1)
+
+
+@node.command('remove')
+@click.argument('node')
+def node_remove(node):
+    """Remove a node."""
+    _, node_manager, _, _, _, _ = get_managers()
+    try:
+        node_manager.remove_node(node)
+        click.echo(f'Node removed: {node}')
+    except Exception as e:
+        click.echo(f'Failed to remove node: {e}', err=True)
+        sys.exit(1)
+
+
+@node.command('edit')
+@click.argument('node')
+@click.option('--name', default=None, help='New name')
+@click.option('--address', default=None, help='New address')
+@click.option('--port', default=None, type=int, help='New port')
+@click.option('--uuid', default=None, help='New UUID')
+@click.option('--password', default=None, help='New password')
+@click.option('--group', default=None, help='New group')
+@click.option('--tls', is_flag=True, default=None, help='Toggle TLS')
+@click.option('--servername', default=None, help='New server name')
+def node_edit(node, name, address, port, uuid, password, group, tls, servername):
+    """Edit node configuration."""
+    _, node_manager, _, _, _, _ = get_managers()
+    try:
+        updates = {}
+        if name:
+            updates['name'] = name
+        if address:
+            updates['address'] = address
+        if port:
+            updates['port'] = port
+        if uuid:
+            updates['uuid'] = uuid
+        if password:
+            updates['password'] = password
+        if group:
+            updates['group'] = group
+        if tls is not None:
+            updates['tls'] = tls
+        if servername:
+            updates['servername'] = servername
+
+        if not updates:
+            click.echo('No changes specified')
+            return
+
+        node_manager.update_node(node, updates)
+        click.echo(f'Node updated: {node}')
+    except Exception as e:
+        click.echo(f'Failed to edit node: {e}', err=True)
+        sys.exit(1)
+
+
+@node.command('import')
+@click.argument('url')
+def node_import(url):
+    """Import nodes from subscription URL."""
+    _, node_manager, _, _, _, _ = get_managers()
+    try:
+        count = node_manager.import_from_subscription(url)
+        click.echo(f'Imported {count} nodes')
+    except Exception as e:
+        click.echo(f'Failed to import: {e}', err=True)
+        sys.exit(1)
+
+
+@node.command('export')
+@click.option('-f', '--format', 'fmt', default='json',
+              type=click.Choice(['json', 'yaml']), help='Export format')
+def node_export(fmt):
+    """Export nodes configuration."""
+    _, node_manager, _, _, _, _ = get_managers()
+    try:
+        output = node_manager.export_nodes(format=fmt)
+        click.echo(output)
+    except Exception as e:
+        click.echo(f'Failed to export: {e}', err=True)
+        sys.exit(1)
+
+
+# ==================== Test Commands ====================
+
+@cli.command()
+@click.argument('node', required=False)
+@click.option('--all-nodes', '-a', 'test_all', is_flag=True, help='Test all nodes')
+@click.option('--current', is_flag=True, help='Test current node only')
+@click.option('--group', default=None, help='Test nodes in a group')
+def test(node, test_all, current, group):
+    """Test node connectivity and latency."""
+    setup_logging()
+    _, node_manager, _, _, health_checker, _ = get_managers()
+    try:
+        if test_all:
+            node_ids = node_manager.get_node_ids()
+        elif current:
+            default = node_manager.get_default_node()
+            if not default:
+                click.echo('No default node set')
+                sys.exit(1)
+            node_ids = [default]
+        elif group:
+            nodes = node_manager.list_nodes(filter_group=group)
+            node_ids = [n['id'] for n in nodes]
+        elif node:
+            node_ids = [node]
+        else:
+            click.echo('Specify a node, --all, --current, or --group')
+            return
+
+        if not node_ids:
+            click.echo('No nodes to test')
+            return
+
+        click.echo(f'Testing {len(node_ids)} node(s)...')
+        results = health_checker.batch_check(node_ids)
+        results = health_checker.sort_by_latency(results)
+
+        for r in results:
+            status = click.style('OK', fg='green') if r.get('connected') else click.style('FAIL', fg='red')
+            latency = f'{r["latency"]}ms' if r.get('latency', -1) > 0 else 'N/A'
+            error = f' ({r["error"]})' if r.get('error') else ''
+            click.echo(f'  {r["name"]}: {status} {latency}{error}')
+    except Exception as e:
+        click.echo(f'Error: {e}', err=True)
+        sys.exit(1)
+
+
+# ==================== Routing Commands ====================
+
+@cli.group()
+def routing():
+    """Routing rule management commands."""
+    pass
+
+
+@routing.command('list')
+def routing_list():
+    """List all routing rules."""
+    _, node_manager, routing_manager, _, _, _ = get_managers()
+    try:
+        proxy_rules = routing_manager.get_proxy_rules()
+        direct_rules = routing_manager.get_direct_rules()
+        block_rules = routing_manager.get_block_rules()
+        domain_rules = routing_manager.get_domain_rules()
+
+        click.echo('Proxy rules:')
+        for r in proxy_rules:
+            click.echo(f'  [PROXY] {r}')
+
+        click.echo('\nDirect rules:')
+        for r in direct_rules:
+            click.echo(f'  [DIRECT] {r}')
+
+        if block_rules:
+            click.echo('\nBlock rules:')
+            for r in block_rules:
+                click.echo(f'  [BLOCK] {r}')
+
+        if domain_rules:
+            click.echo('\nDomain-to-node rules:')
+            for i, rule in enumerate(domain_rules):
+                desc = rule.get('description', ', '.join(rule['domains']))
+                click.echo(f'  [{i}] {desc} -> {rule["node_id"]}')
+    except Exception as e:
+        click.echo(f'Error: {e}', err=True)
+        sys.exit(1)
+
+
+@routing.command('add')
+@click.argument('type', type=click.Choice(['proxy', 'direct', 'block']))
+@click.argument('rule')
+def routing_add(type, rule):
+    """Add a routing rule."""
+    _, _, routing_manager, _, _, _ = get_managers()
+    try:
+        if type == 'proxy':
+            routing_manager.add_proxy_rule(rule)
+        elif type == 'direct':
+            routing_manager.add_direct_rule(rule)
+        elif type == 'block':
+            routing_manager.add_block_rule(rule)
+        click.echo(f'Added {type} rule: {rule}')
+    except Exception as e:
+        click.echo(f'Failed to add rule: {e}', err=True)
+        sys.exit(1)
+
+
+@routing.command('remove')
+@click.argument('rule')
+def routing_remove(rule):
+    """Remove a routing rule."""
+    _, _, routing_manager, _, _, _ = get_managers()
+    try:
+        if routing_manager.remove_rule(rule):
+            click.echo(f'Removed rule: {rule}')
+        else:
+            click.echo(f'Rule not found: {rule}')
+    except Exception as e:
+        click.echo(f'Failed to remove rule: {e}', err=True)
+        sys.exit(1)
+
+
+# ==================== Domain Routing Commands ====================
+
+@routing.group()
+def domain():
+    """Domain-to-node routing rules (specific sites use specific nodes)."""
+    pass
+
+
+@domain.command('add')
+@click.option('--domains', '-d', required=True, multiple=True,
+              help='Domain patterns (can be specified multiple times, e.g., -d github.com -d *.github.io)')
+@click.option('--node', '-n', required=True, help='Node ID to route these domains through')
+@click.option('--desc', default='', help='Description for this rule')
+def domain_add(domains, node, desc):
+    """Add a domain-to-node routing rule.
+
+    Example: Route GitHub through a specific node.
+
+        xray-pilot routing domain add -d github.com -d '*.github.io' -d api.github.com -n github_node --desc "GitHub"
+    """
+    _, node_manager, routing_manager, _, _, _ = get_managers()
+    try:
+        # Validate node exists
+        node_manager.get_node(node)
+        domain_list = list(domains)
+        if not domain_list:
+            click.echo('At least one domain is required')
+            sys.exit(1)
+        description = desc or ', '.join(domain_list)
+        routing_manager.add_domain_rule(domain_list, node, description)
+        click.echo(f'Added domain rule: {description} -> {node}')
+    except Exception as e:
+        click.echo(f'Failed to add domain rule: {e}', err=True)
+        sys.exit(1)
+
+
+@domain.command('remove')
+@click.argument('index', type=int)
+def domain_remove(index):
+    """Remove a domain rule by index.
+
+    Use `xray-pilot routing list` to see rule indices.
+
+    Example:
+
+        xray-pilot routing domain remove 0
+    """
+    _, _, routing_manager, _, _, _ = get_managers()
+    try:
+        if routing_manager.remove_domain_rule(index):
+            click.echo(f'Removed domain rule at index {index}')
+        else:
+            click.echo(f'No rule at index {index}')
+    except Exception as e:
+        click.echo(f'Failed to remove domain rule: {e}', err=True)
+        sys.exit(1)
+
+
+@domain.command('clear')
+@click.option('-f', '--force', is_flag=True, help='Force clear without confirmation')
+def domain_clear(force):
+    """Clear all domain-to-node rules."""
+    _, _, routing_manager, _, _, _ = get_managers()
+    try:
+        if not force:
+            if not click.confirm('Clear all domain rules?'):
+                click.echo('Cancelled')
+                return
+        routing_manager.clear_domain_rules()
+        click.echo('Cleared all domain rules')
+    except Exception as e:
+        click.echo(f'Failed to clear domain rules: {e}', err=True)
+        sys.exit(1)
+
+
+# ==================== Subscription Commands ====================
+
+@cli.group()
+def subscription():
+    """Subscription management commands."""
+    pass
+
+
+@subscription.command('add')
+@click.argument('url')
+@click.option('--name', required=True, help='Subscription name')
+def subscription_add(url, name):
+    """Add a subscription source."""
+    config, _, _, _, _, _ = get_managers()
+    try:
+        settings = config.load_config('settings.json')
+        subs = settings.setdefault('subscriptions', {})
+        subs[name] = url
+        config.save_config('settings.json', settings)
+        click.echo(f'Subscription added: {name}')
+    except Exception as e:
+        click.echo(f'Failed to add subscription: {e}', err=True)
+        sys.exit(1)
+
+
+@subscription.command('update')
+@click.argument('name', required=False)
+def subscription_update(name):
+    """Update subscription(s)."""
+    config, node_manager, _, _, _, _ = get_managers()
+    try:
+        settings = config.load_config('settings.json')
+        subs = settings.get('subscriptions', {})
+        if not subs:
+            click.echo('No subscriptions configured')
+            return
+
+        if name:
+            if name not in subs:
+                click.echo(f'Subscription not found: {name}')
+                sys.exit(1)
+            subs = {name: subs[name]}
+
+        for sub_name, url in subs.items():
+            click.echo(f'Updating {sub_name}...')
+            try:
+                count = node_manager.import_from_subscription(url)
+                click.echo(f'  Imported {count} nodes from {sub_name}')
+            except Exception as e:
+                click.echo(f'  Failed: {e}', err=True)
+    except Exception as e:
+        click.echo(f'Error: {e}', err=True)
+        sys.exit(1)
+
+
+@subscription.command('list')
+def subscription_list():
+    """List subscription sources."""
+    config, _, _, _, _, _ = get_managers()
+    try:
+        settings = config.load_config('settings.json')
+        subs = settings.get('subscriptions', {})
+        if not subs:
+            click.echo('No subscriptions configured')
+            return
+        for name, url in subs.items():
+            click.echo(f'  {name}: {url}')
+    except Exception as e:
+        click.echo(f'Error: {e}', err=True)
+        sys.exit(1)
+
+
+@subscription.command('remove')
+@click.argument('name')
+def subscription_remove(name):
+    """Remove a subscription source."""
+    config, _, _, _, _, _ = get_managers()
+    try:
+        settings = config.load_config('settings.json')
+        subs = settings.get('subscriptions', {})
+        if name not in subs:
+            click.echo(f'Subscription not found: {name}')
+            sys.exit(1)
+        del subs[name]
+        config.save_config('settings.json', settings)
+        click.echo(f'Subscription removed: {name}')
+    except Exception as e:
+        click.echo(f'Failed to remove subscription: {e}', err=True)
+        sys.exit(1)
+
+
+# ==================== Launchd Service Commands (macOS) ====================
+
+def _build_launchd_plist() -> str:
+    """Build the launchd plist content for the monitor daemon."""
+    python_bin = sys.executable
+    # Use the project root so the package is importable.
+    workdir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    stdout_log = '/tmp/xray-pilot-monitor.log'
+    stderr_log = '/tmp/xray-pilot-monitor.err'
+
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{LAUNCHD_LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{python_bin}</string>
+        <string>-m</string>
+        <string>xray_pilot.cli</string>
+        <string>monitor</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>{workdir}</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>{stdout_log}</string>
+    <key>StandardErrorPath</key>
+    <string>{stderr_log}</string>
+</dict>
+</plist>
+"""
+
+
+@cli.command('install-launchd')
+def install_launchd():
+    """Install a launchd service to keep the monitor daemon alive (macOS).
+
+    With KeepAlive=true, launchd will automatically restart the monitor if it
+    crashes or is killed, and start it on login. This provides an outer layer
+    of protection beyond the in-process watchdog.
+    """
+    if platform.system() != 'Darwin':
+        click.echo('launchd integration is only available on macOS', err=True)
+        sys.exit(1)
+
+    try:
+        # Unload existing service if present
+        if os.path.exists(LAUNCHD_PLIST_PATH):
+            subprocess.run(
+                ['launchctl', 'unload', LAUNCHD_PLIST_PATH],
+                capture_output=True
+            )
+
+        # Write plist
+        os.makedirs(os.path.dirname(LAUNCHD_PLIST_PATH), exist_ok=True)
+        plist_content = _build_launchd_plist()
+        with open(LAUNCHD_PLIST_PATH, 'w') as f:
+            f.write(plist_content)
+
+        # Load the service
+        result = subprocess.run(
+            ['launchctl', 'load', LAUNCHD_PLIST_PATH],
+            capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            click.echo(f'Failed to load launchd service: {result.stderr.strip()}', err=True)
+            sys.exit(1)
+
+        click.echo(click.style('launchd service installed and started', fg='green'))
+        click.echo(f'  Label: {LAUNCHD_LABEL}')
+        click.echo(f'  Plist: {LAUNCHD_PLIST_PATH}')
+        click.echo(f'  Logs:  /tmp/xray-pilot-monitor.log')
+        click.echo('  The monitor will auto-start on login and restart if killed.')
+    except PermissionError as e:
+        click.echo(f'Permission denied: {e}', err=True)
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f'Failed to install launchd service: {e}', err=True)
+        sys.exit(1)
+
+
+@cli.command('uninstall-launchd')
+def uninstall_launchd():
+    """Uninstall the launchd monitor service (macOS)."""
+    if platform.system() != 'Darwin':
+        click.echo('launchd integration is only available on macOS', err=True)
+        sys.exit(1)
+
+    try:
+        if not os.path.exists(LAUNCHD_PLIST_PATH):
+            click.echo('launchd service is not installed')
+            return
+
+        subprocess.run(
+            ['launchctl', 'unload', LAUNCHD_PLIST_PATH],
+            capture_output=True
+        )
+        os.remove(LAUNCHD_PLIST_PATH)
+        click.echo(click.style('launchd service removed', fg='green'))
+        click.echo(f'  Removed: {LAUNCHD_PLIST_PATH}')
+    except Exception as e:
+        click.echo(f'Failed to uninstall launchd service: {e}', err=True)
+        sys.exit(1)
+
+
+# ==================== Config Commands ====================
+
+@cli.group()
+def config():
+    """Configuration management commands."""
+    pass
+
+
+@config.command('show')
+def config_show():
+    """Show current configuration."""
+    cfg, _, _, _, _, _ = get_managers()
+    try:
+        settings = cfg.load_config('settings.json')
+        import json
+        click.echo(json.dumps(settings, indent=2))
+    except Exception as e:
+        click.echo(f'Error: {e}', err=True)
+        sys.exit(1)
+
+
+@config.command('set')
+@click.argument('key')
+@click.argument('value')
+def config_set(key, value):
+    """Set a configuration value."""
+    cfg, _, _, _, _, _ = get_managers()
+    try:
+        # Try to convert value types
+        if value.lower() in ('true', 'false'):
+            value = value.lower() == 'true'
+        elif value.isdigit():
+            value = int(value)
+        cfg.set_setting(key, value)
+        click.echo(f'Set {key} = {value}')
+    except Exception as e:
+        click.echo(f'Failed to set config: {e}', err=True)
+        sys.exit(1)
+
+
+@config.command('reset')
+@click.option('-f', '--force', is_flag=True, help='Force reset without confirmation')
+def config_reset(force):
+    """Reset configuration to defaults."""
+    if not force:
+        if not click.confirm('This will overwrite all configuration files. Continue?'):
+            click.echo('Cancelled')
+            return
+    cfg, _, _, _, _, _ = get_managers()
+    try:
+        created = cfg.init_default_configs(force=True)
+        click.echo(f'Reset config files: {", ".join(created)}')
+    except Exception as e:
+        click.echo(f'Failed to reset config: {e}', err=True)
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    cli()

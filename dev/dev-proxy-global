@@ -1,0 +1,19 @@
+#!/bin/bash
+# dev-proxy — Global command wrapper for isolated dev proxy
+# This script is installed to PATH during `pip install -e .`
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WRAPPER="$(dirname "$SCRIPT_DIR")/dev/dev-proxy.sh"
+
+if [ ! -f "$WRAPPER" ]; then
+    # Fallback: try relative to project root
+    PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
+    WRAPPER="$PROJECT_ROOT/dev/dev-proxy.sh"
+fi
+
+if [ ! -f "$WRAPPER" ]; then
+    echo "Error: dev-proxy.sh not found" >&2
+    exit 1
+fi
+
+exec bash "$WRAPPER" "$@"
