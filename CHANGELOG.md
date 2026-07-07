@@ -1,0 +1,22 @@
+# 更新日志
+
+本项目所有重要变更均会记录在此文件中。
+
+格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
+
+## [0.1.0] - 2026-07-07
+
+首个发布版本。一个纯 Python 的命令行代理工具包，以 [Xray-core](https://github.com/XTLS/Xray-core)（v26.3.27）作为后端，提供节点管理、代理服务控制、健康检查与自动切换等功能。
+
+### 新增
+
+- 支持协议：VMess、VLESS、Trojan、Shadowsocks。
+- 节点管理模块：节点的增删改查与导入。
+- 智能节点健康检测：基于延迟与连通性的健康检查。
+- 自动节点切换：依据延迟阈值在节点间自动切换。
+- 订阅自动导入：支持 Base64、JSON、Clash 三种订阅格式。
+- macOS 系统代理集成：一键开启与关闭系统代理。
+- 灵活的路由规则管理：支持代理、直连、拦截三类规则配置。
+- 命令行入口 `xray-pilot`（基于 Click）。
+- 配套单元测试、Docker 部署文件、开发工具链与发布工作流。
+- MIT 开源协议。
