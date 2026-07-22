@@ -1,3 +1,15 @@
+<div align="center">
+  <img src="assets/logo.svg" alt="xpilot logo" width="380">
+
+  <p>
+    <a href="LICENSE.md"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+    <img src="https://img.shields.io/github/stars/xhqing/xpilot?style=social" alt="GitHub Stars">
+    <img src="https://img.shields.io/github/last-commit/xhqing/xpilot" alt="Last Commit">
+    <img src="https://img.shields.io/badge/Built%20with-Claude%20Code-19C37D" alt="Built with Claude Code">
+    <img src="https://img.shields.io/badge/Type-Project-lightgrey" alt="Type: Project">
+  </p>
+</div>
+
 # xpilot
 
 [English](README.md) | 简体中文
@@ -760,3 +772,18 @@ xpilot config set log_level debug
 - 增加测试超时时间
 
 ---
+
+## 版权与署名
+
+本项目基于 [MIT 协议](LICENSE.md) 开源。
+
+Copyright (c) 2026 All Contributors。
+
+### 署名方式
+
+如果你复用或再分发本项目的任何部分，请：
+
+- 保留上方版权声明与 MIT 协议文本。
+- 通过链接回项目原始来源的方式注明出处。
+
+**项目地址：** [https://github.com/xhqing/xpilot](https://github.com/xhqing/xpilot)

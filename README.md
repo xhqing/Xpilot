@@ -1,3 +1,15 @@
+<div align="center">
+  <img src="assets/logo.svg" alt="xpilot logo" width="380">
+
+  <p>
+    <a href="LICENSE.md"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+    <img src="https://img.shields.io/github/stars/xhqing/xpilot?style=social" alt="GitHub Stars">
+    <img src="https://img.shields.io/github/last-commit/xhqing/xpilot" alt="Last Commit">
+    <img src="https://img.shields.io/badge/Built%20with-Claude%20Code-19C37D" alt="Built with Claude Code">
+    <img src="https://img.shields.io/badge/Type-Project-lightgrey" alt="Type: Project">
+  </p>
+</div>
+
 # xpilot
 
 [简体中文](README_cn.md) | English
@@ -760,3 +772,18 @@ xpilot config set log_level debug
 - Increase the test timeout
 
 ---
+
+## License & Attribution
+
+This project is licensed under the [MIT License](LICENSE.md).
+
+Copyright (c) 2026 All Contributors.
+
+### Attribution
+
+If you reuse or redistribute any part of this project, please:
+
+- Retain the above copyright notice and the MIT license text.
+- Credit the project by linking back to its source.
+
+**Project URL:** [https://github.com/xhqing/xpilot](https://github.com/xhqing/xpilot)
