@@ -3,7 +3,7 @@
   "socks_port": 1080,
   "http_port": 1087,
   "log_level": "warning",
-  "log_file": "/tmp/xray-pilot.log",
+  "log_file": "/tmp/xpilot.log",
   "auto_switch": {
     "enabled": true,
     "interval": 300,

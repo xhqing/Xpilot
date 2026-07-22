@@ -1,4 +1,4 @@
-"""Node management for Xray Pilot."""
+"""Node management for xpilot."""
 
 import logging
 import yaml
@@ -110,6 +110,27 @@ class NodeManager:
         if node_id not in nodes:
             raise NodeNotFoundError(f'Node not found: {node_id}')
         return nodes[node_id]
+
+    def resolve_node_ref(self, ref: str) -> str:
+        """Resolve a user-facing reference (ID or name) to a node ID.
+
+        The ID is tried first; if it does not exist, an exact name match is
+        used. This lets users operate on non-ASCII node names (e.g.
+        ``node remove "日本节点"``) whose auto-generated IDs are hashes.
+
+        Raises NodeNotFoundError when nothing matches, or NodeError when the
+        name is ambiguous (matches more than one node).
+        """
+        nodes_config = self.config.load_config('nodes.json')
+        nodes = nodes_config.get('nodes', {})
+        if ref in nodes:
+            return ref
+        matches = [nid for nid, n in nodes.items() if n.get('name') == ref]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            raise NodeError(f'Multiple nodes match name "{ref}": {", ".join(matches)}')
+        raise NodeNotFoundError(f'Node not found: {ref}')
 
     def list_nodes(self, filter_group: str = None) -> list:
         """List all nodes, optionally filtered by group."""

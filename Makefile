@@ -14,19 +14,19 @@ test:
 
 # Run tests with coverage
 test-cov:
-	python -m pytest tests/ -v --cov=xray_pilot --cov-report=term-missing
+	python -m pytest tests/ -v --cov=xpilot --cov-report=term-missing
 
 # Lint code
 lint:
-	ruff check xray_pilot/ tests/
+	ruff check xpilot/ tests/
 
 # Format code
 fmt:
-	ruff check xray_pilot/ tests/ --fix
+	ruff check xpilot/ tests/ --fix
 
 # Clean build artifacts
 clean:
-	rm -rf build/ dist/ *.egg-info xray_pilot.egg-info
+	rm -rf build/ dist/ *.egg-info xpilot.egg-info
 	find . -type d -name __pycache__ -exec rm -rf {} +
 	find . -type f -name '*.pyc' -delete
 
@@ -64,7 +64,7 @@ dev-proxy-test:
 
 # Build Docker image
 docker-build:
-	docker build -t xray-pilot-dev .
+	docker build -t xpilot-dev .
 
 # Run in Docker with network isolation
 docker-run:
@@ -73,11 +73,11 @@ docker-run:
 		-p 1080:1080 \
 		-p 1087:1087 \
 		-v $(PWD):/app \
-		xray-pilot-dev
+		xpilot-dev
 
 # Enter Docker shell for development
 docker-shell:
 	docker run --rm -it \
 		--network bridge \
 		-v $(PWD):/app \
-		xray-pilot-dev /bin/bash
+		xpilot-dev /bin/bash

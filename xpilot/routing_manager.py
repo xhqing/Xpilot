@@ -1,4 +1,4 @@
-"""Routing rule management for Xray Pilot."""
+"""Routing rule management for xpilot."""
 
 import logging
 

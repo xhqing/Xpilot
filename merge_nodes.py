@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Merge nodes.json from another project into XrayPilot config."""
+"""Merge nodes.json from another project into xpilot config."""
 
 import json
 import os
@@ -34,7 +34,7 @@ def generate_node_id(name: str, existing_ids: set) -> str:
 
 
 def merge_nodes(source_path: str, target_path: str = None) -> None:
-    """Merge nodes from source file into XrayPilot config."""
+    """Merge nodes from source file into xpilot config."""
     # Source config
     source = load_json(source_path)
     source_nodes = source.get('nodes', {})
@@ -46,12 +46,12 @@ def merge_nodes(source_path: str, target_path: str = None) -> None:
 
     # Target config
     if target_path is None:
-        config_dir = os.path.expanduser('~/.config/xray-pilot')
+        config_dir = os.path.expanduser('~/.config/xpilot')
         target_path = os.path.join(config_dir, 'nodes.json')
     
     if not os.path.exists(target_path):
         print(f'Target config not found: {target_path}')
-        print('Run `xray-pilot init` first.')
+        print('Run `xpilot init` first.')
         sys.exit(1)
 
     target = load_json(target_path)

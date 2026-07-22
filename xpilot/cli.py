@@ -1,4 +1,4 @@
-"""CLI entry point for Xray Pilot."""
+"""CLI entry point for xpilot."""
 
 import os
 import signal
@@ -13,18 +13,52 @@ from .config import Config, ConfigError
 from .utils import get_config_dir
 
 
-def setup_logging(log_level='warning'):
-    """Configure logging."""
+def setup_logging():
+    """Configure logging to write to both the terminal and a log file.
+
+    The log level and file path come from settings.json (``log_level`` and
+    ``log_file``), defaulting to WARNING and ``/tmp/xpilot.log``. The file
+    handler is essential for debugging: the auto-switch monitor runs as a
+    detached background daemon whose own stdout/stderr are discarded, so
+    without a persistent log file its output would be lost for good.
+    """
+    try:
+        settings = Config().load_config('settings.json')
+    except Exception:
+        settings = {}
+    log_level = settings.get('log_level', 'warning')
+    log_file = settings.get('log_file', '/tmp/xpilot.log')
     level = getattr(logging, log_level.upper(), logging.WARNING)
-    logging.basicConfig(
-        level=level,
-        format='%(asctime)s [%(levelname)s] %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
+
+    root = logging.getLogger()
+    root.setLevel(level)
+    # Repeated calls (several commands invoke setup_logging) must not stack
+    # duplicate handlers on the root logger.
+    if getattr(root, '_xpilot_handlers_configured', False):
+        return
+    formatter = logging.Formatter(
+        '%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+        '%Y-%m-%d %H:%M:%S'
     )
+    # File handler (append mode) — preserves background daemon output.
+    try:
+        log_dir = os.path.dirname(log_file)
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setFormatter(formatter)
+        root.addHandler(file_handler)
+    except Exception:
+        pass
+    # Stream handler — immediate feedback in interactive runs.
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    root.addHandler(stream_handler)
+    root._xpilot_handlers_configured = True
 
 
-AUTO_SWITCH_PID_FILE = '/tmp/xray-pilot-auto-switch.pid'
-LAUNCHD_LABEL = 'com.xray-pilot.monitor'
+AUTO_SWITCH_PID_FILE = '/tmp/xpilot-auto-switch.pid'
+LAUNCHD_LABEL = 'com.xpilot.monitor'
 LAUNCHD_PLIST_PATH = os.path.expanduser(
     f'~/Library/LaunchAgents/{LAUNCHD_LABEL}.plist'
 )
@@ -58,7 +92,7 @@ def _spawn_monitor_daemon():
     keeping the watchdog alive after the command returns.
     """
     _stop_monitor_daemon()
-    cmd = [sys.executable, '-m', 'xray_pilot.cli', 'monitor']
+    cmd = [sys.executable, '-m', 'xpilot.cli', 'monitor']
     try:
         proc = subprocess.Popen(
             cmd,
@@ -93,9 +127,9 @@ def get_managers():
 
 
 @click.group()
-@click.version_option(version='0.1.0', prog_name='xray-pilot')
+@click.version_option(version='0.1.0', prog_name='xpilot')
 def cli():
-    """Xray Pilot - A CLI proxy management tool with xray backend."""
+    """xpilot - A CLI proxy management tool with xray backend."""
     pass
 
 
@@ -122,11 +156,10 @@ def init(force):
 
 @cli.command()
 @click.argument('node', required=False)
-@click.option('-b', '--background', is_flag=True, help='Run auto-switch monitor in background')
-def start(node, background):
-    """Start proxy service."""
+def start(node):
+    """Start proxy service in the background and return immediately."""
     setup_logging()
-    _, node_manager, _, proxy_manager, health_checker, auto_switch = get_managers()
+    _, node_manager, _, proxy_manager, health_checker, _ = get_managers()
     try:
         if node is None:
             # Auto-select fastest node
@@ -150,26 +183,13 @@ def start(node, background):
                 click.echo('No available node found, using default', err=True)
                 sys.exit(1)
         
+        node = node_manager.resolve_node_ref(node)
         node_name = proxy_manager.start(node)
         click.echo(click.style(f'Proxy started (node: {node_name})', fg='green'))
         
-        # When run by an agent/IDE (non-tty) or with --background, spawn a
-        # detached monitor process so the CLI command can return immediately
-        # while the watchdog keeps running.
-        if background or not sys.stdout.isatty():
-            _spawn_monitor_daemon()
-        else:
-            # Interactive mode: keep the monitor in-process so Ctrl+C stops it.
-            auto_switch.start()
-            if auto_switch._running:
-                click.echo('Auto-switch is running. Press Ctrl+C to stop.')
-                try:
-                    while True:
-                        time.sleep(1)
-                except KeyboardInterrupt:
-                    click.echo('\nStopping proxy...')
-                    proxy_manager.stop()
-                    auto_switch.stop()
+        # Always run in the background: spawn a detached monitor process so the
+        # CLI command returns immediately while the watchdog stays alive.
+        _spawn_monitor_daemon()
     except Exception as e:
         click.echo(f'Failed to start proxy: {e}', err=True)
         sys.exit(1)
@@ -190,11 +210,10 @@ def stop():
 
 
 @cli.command()
-@click.option('-b', '--background', is_flag=True, help='Run auto-switch monitor in background')
-def restart(background):
-    """Restart proxy service."""
+def restart():
+    """Restart proxy service in the background and return immediately."""
     setup_logging()
-    _, node_manager, _, proxy_manager, health_checker, auto_switch = get_managers()
+    _, node_manager, _, proxy_manager, health_checker, _ = get_managers()
     try:
         # Auto-select fastest node
         click.echo('Auto-selecting fastest node...')
@@ -220,23 +239,9 @@ def restart(background):
             proxy_manager.restart()
             click.echo('Proxy restarted (no node available)')
         
-        # When run by an agent/IDE (non-tty) or with --background, spawn a
-        # detached monitor process so the CLI command can return immediately
-        # while the watchdog keeps running.
-        if background or not sys.stdout.isatty():
-            _spawn_monitor_daemon()
-        else:
-            # Interactive mode: keep the monitor in-process so Ctrl+C stops it.
-            auto_switch.start()
-            if auto_switch._running:
-                click.echo('Auto-switch is running. Press Ctrl+C to stop.')
-                try:
-                    while True:
-                        time.sleep(1)
-                except KeyboardInterrupt:
-                    click.echo('\nStopping proxy...')
-                    proxy_manager.stop()
-                    auto_switch.stop()
+        # Always run in the background: spawn a detached monitor process so the
+        # CLI command returns immediately while the watchdog stays alive.
+        _spawn_monitor_daemon()
     except Exception as e:
         click.echo(f'Failed to restart proxy: {e}', err=True)
         sys.exit(1)
@@ -296,7 +301,8 @@ def switch(node):
     setup_logging()
     _, node_manager, _, proxy_manager, _, _ = get_managers()
     try:
-        # Validate node exists
+        # Resolve ID or name, then validate
+        node = node_manager.resolve_node_ref(node)
         node_manager.get_node(node)
         was_running = proxy_manager.is_running()
         if was_running:
@@ -392,6 +398,7 @@ def node_remove(node):
     """Remove a node."""
     _, node_manager, _, _, _, _ = get_managers()
     try:
+        node = node_manager.resolve_node_ref(node)
         node_manager.remove_node(node)
         click.echo(f'Node removed: {node}')
     except Exception as e:
@@ -435,6 +442,7 @@ def node_edit(node, name, address, port, uuid, password, group, tls, servername)
             click.echo('No changes specified')
             return
 
+        node = node_manager.resolve_node_ref(node)
         node_manager.update_node(node, updates)
         click.echo(f'Node updated: {node}')
     except Exception as e:
@@ -493,7 +501,7 @@ def test(node, test_all, current, group):
             nodes = node_manager.list_nodes(filter_group=group)
             node_ids = [n['id'] for n in nodes]
         elif node:
-            node_ids = [node]
+            node_ids = [node_manager.resolve_node_ref(node)]
         else:
             click.echo('Specify a node, --all, --current, or --group')
             return
@@ -609,11 +617,12 @@ def domain_add(domains, node, desc):
 
     Example: Route GitHub through a specific node.
 
-        xray-pilot routing domain add -d github.com -d '*.github.io' -d api.github.com -n github_node --desc "GitHub"
+        xpilot routing domain add -d github.com -d '*.github.io' -d api.github.com -n github_node --desc "GitHub"
     """
     _, node_manager, routing_manager, _, _, _ = get_managers()
     try:
-        # Validate node exists
+        # Resolve node ID or name, then validate
+        node = node_manager.resolve_node_ref(node)
         node_manager.get_node(node)
         domain_list = list(domains)
         if not domain_list:
@@ -632,11 +641,11 @@ def domain_add(domains, node, desc):
 def domain_remove(index):
     """Remove a domain rule by index.
 
-    Use `xray-pilot routing list` to see rule indices.
+    Use `xpilot routing list` to see rule indices.
 
     Example:
 
-        xray-pilot routing domain remove 0
+        xpilot routing domain remove 0
     """
     _, _, routing_manager, _, _, _ = get_managers()
     try:
@@ -764,8 +773,8 @@ def _build_launchd_plist() -> str:
     python_bin = sys.executable
     # Use the project root so the package is importable.
     workdir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    stdout_log = '/tmp/xray-pilot-monitor.log'
-    stderr_log = '/tmp/xray-pilot-monitor.err'
+    stdout_log = '/tmp/xpilot-monitor.log'
+    stderr_log = '/tmp/xpilot-monitor.err'
 
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -777,7 +786,7 @@ def _build_launchd_plist() -> str:
     <array>
         <string>{python_bin}</string>
         <string>-m</string>
-        <string>xray_pilot.cli</string>
+        <string>xpilot.cli</string>
         <string>monitor</string>
     </array>
     <key>WorkingDirectory</key>
@@ -833,7 +842,7 @@ def install_launchd():
         click.echo(click.style('launchd service installed and started', fg='green'))
         click.echo(f'  Label: {LAUNCHD_LABEL}')
         click.echo(f'  Plist: {LAUNCHD_PLIST_PATH}')
-        click.echo(f'  Logs:  /tmp/xray-pilot-monitor.log')
+        click.echo(f'  Logs:  /tmp/xpilot-monitor.log')
         click.echo('  The monitor will auto-start on login and restart if killed.')
     except PermissionError as e:
         click.echo(f'Permission denied: {e}', err=True)

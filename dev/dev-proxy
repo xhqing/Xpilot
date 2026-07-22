@@ -1,4 +1,4 @@
 #!/bin/bash
-# dev-proxy — Global wrapper for XrayPilot isolated dev proxy
+# dev-proxy — Global wrapper for xpilot isolated dev proxy
 # Installed to PATH during pip install -e .
 exec bash "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/../dev/dev-proxy.sh" "$@"

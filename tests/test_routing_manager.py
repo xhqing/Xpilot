@@ -2,8 +2,8 @@
 
 import pytest
 
-from xray_pilot.config import Config
-from xray_pilot.routing_manager import RoutingManager
+from xpilot.config import Config
+from xpilot.routing_manager import RoutingManager
 
 
 @pytest.fixture
@@ -91,7 +91,7 @@ class TestRoutingManager:
     def test_generate_xray_routing_rules_with_domain(self, manager):
         """测试：生成 xray 路由规则时包含域名映射规则和对应的 outbound 信息。"""
         manager.add_proxy_rule('geosite:google')
-        manager.add_direct_rule('geosite:cn')
+        manager.add_direct_rule('geoip:private')
         manager.add_domain_rule(['github.com'], 'github_node', 'GitHub')
 
         result = manager.generate_xray_routing_rules()

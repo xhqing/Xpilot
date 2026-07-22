@@ -1,12 +1,12 @@
 #!/bin/bash
 # =============================================================================
-# dev-proxy — Isolated proxy manager for XrayPilot development
+# dev-proxy — Isolated proxy manager for xpilot development
 # =============================================================================
-# Mirrors the `xray-pilot` CLI interface exactly, but uses:
+# Mirrors the `xpilot` CLI interface exactly, but uses:
 #   - Independent ports 2080/2087 (never touches 1080/1087)
 #   - No system proxy modification
 #   - Independent PID/log files
-#   - Shared node/routing config (same data as xray-pilot)
+#   - Shared node/routing config (same data as xpilot)
 # =============================================================================
 
 set -euo pipefail
@@ -27,7 +27,7 @@ SCRIPT_DIR="$(resolve_path "${BASH_SOURCE[0]}")"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 ISOLATED_PY="${SCRIPT_DIR}/isolated_proxy.py"
 
-# Passthrough wrapper: calls the real xray-pilot CLI with shared config.
+# Passthrough wrapper: calls the real xpilot CLI with shared config.
 # Uses env var to pass args since python3 -c doesn't receive them in sys.argv.
 run_cli() {
     local subcmd="$1"
@@ -41,7 +41,7 @@ import sys, os
 sys.path.insert(0, os.path.abspath('.'))
 subcmd = os.environ['RUN_CLI_SUBCMD']
 args = os.environ.get('RUN_CLI_ARGS', '').split()
-from xray_pilot.cli import cli
+from xpilot.cli import cli
 sys.argv = ['dev-proxy', subcmd] + args
 cli(standalone_mode=False)
 PYEOF
@@ -51,7 +51,7 @@ usage() {
     cat <<'EOF'
 Usage: dev-proxy <command> [args]
 
-Mirror of `xray-pilot` CLI — all commands match exactly.
+Mirror of `xpilot` CLI — all commands match exactly.
 
 Proxy management:
   start [node]         Start proxy with isolated config (ports 2080/2087)
@@ -138,13 +138,13 @@ cmd_test() {
 import sys, os
 sys.path.insert(0, os.path.abspath('.'))
 args = os.environ.get('TEST_CLI_ARGS', '').split()
-from xray_pilot.cli import cli
+from xpilot.cli import cli
 sys.argv = ['dev-proxy', 'test'] + args
 cli(standalone_mode=False)
 PYEOF
 }
 
-# --- Main dispatch (mirrors xray-pilot exactly) ---
+# --- Main dispatch (mirrors xpilot exactly) ---
 
 cmd="${1:-help}"
 shift 2>/dev/null || true
@@ -156,7 +156,7 @@ case "$cmd" in
     status)      cmd_status ;;
     switch)      cmd_switch "$@" ;;
     test)        cmd_test "$@" ;;
-    # Everything else passes through to xray-pilot CLI
+    # Everything else passes through to xpilot CLI
     node)        run_cli node "$@" ;;
     routing)     run_cli routing "$@" ;;
     config)      run_cli config "$@" ;;

@@ -3,7 +3,7 @@ version: '3.8'
 services:
   dev:
     build: .
-    container_name: xray-pilot-dev
+    container_name: xpilot-dev
     network_mode: bridge
     ports:
       - "1080:1080"  # SOCKS

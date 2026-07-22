@@ -3,7 +3,7 @@
 
 Starts an independent xray instance on ports 2080/2087 without
 touching system proxy settings. Completely isolated from the main
-xray-pilot instance (ports 1080/1087).
+xpilot instance (ports 1080/1087).
 """
 
 import os
@@ -21,7 +21,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Isolated paths — never overlap with production
-ISOLATED_PREFIX = 'xray-pilot-dev'
+ISOLATED_PREFIX = 'xpilot-dev'
 PID_FILE = f'/tmp/{ISOLATED_PREFIX}.pid'
 XRAY_CONFIG = f'/tmp/{ISOLATED_PREFIX}-xray.json'
 STDOUT_LOG = f'/tmp/{ISOLATED_PREFIX}-xray-stdout.log'
@@ -55,9 +55,20 @@ def find_xray() -> str:
 
 
 def load_nodes() -> dict:
-    """Load nodes from project config."""
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    nodes_path = os.path.join(project_root, 'config', 'nodes.json')
+    """Load nodes from the user config directory.
+
+    Reads the same nodes.json the main xpilot CLI uses
+    (``~/.config/xpilot/nodes.json`` or ``$XDG_CONFIG_HOME/xpilot``),
+    so all node configuration lives in one place outside the project tree.
+    ``PROXY_TOOLKIT_CONFIG_DIR`` overrides the directory wholesale (for tests).
+    """
+    override = os.environ.get('PROXY_TOOLKIT_CONFIG_DIR')
+    if override:
+        base = override
+    else:
+        xdg = os.environ.get('XDG_CONFIG_HOME')
+        base = os.path.join(xdg or os.path.expanduser('~/.config'), 'xpilot')
+    nodes_path = os.path.join(base, 'nodes.json')
     with open(nodes_path) as f:
         return json.load(f)
 

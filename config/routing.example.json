@@ -1,0 +1,15 @@
+{
+  "proxy_all": false,
+  "proxy_list": [
+    "domain:google.com",
+    "domain:github.com",
+    "domain:x.com",
+    "domain:z.ai",
+    "domain:youtube.com"
+  ],
+  "direct_list": [
+    "geoip:private"
+  ],
+  "block_list": [],
+  "rules": []
+}

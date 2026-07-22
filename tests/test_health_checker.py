@@ -2,7 +2,7 @@
 
 import pytest
 
-from xray_pilot.health_checker import HealthChecker
+from xpilot.health_checker import HealthChecker
 
 
 @pytest.fixture

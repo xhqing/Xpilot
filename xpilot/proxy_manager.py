@@ -1,4 +1,4 @@
-"""Proxy service management (xray process control) for Xray Pilot."""
+"""Proxy service management (xray process control) for xpilot."""
 
 import os
 import json
@@ -34,7 +34,7 @@ class ConfigError(ProxyError):
 class ProxyManager:
     """Manage xray proxy service."""
 
-    PID_FILE = '/tmp/xray-pilot.pid'
+    PID_FILE = '/tmp/xpilot.pid'
 
     def __init__(self, config, node_manager, routing_manager=None):
         self.config = config
@@ -83,7 +83,7 @@ class ProxyManager:
         xray_config = self.generate_xray_config(node)
 
         # Write xray config to temp file
-        xray_config_path = '/tmp/xray-pilot-xray.json'
+        xray_config_path = '/tmp/xpilot-xray.json'
         with open(xray_config_path, 'w') as f:
             json.dump(xray_config, f, indent=2)
 
@@ -92,8 +92,8 @@ class ProxyManager:
             raise ProxyStartError(f'Xray binary not found: {xray_bin}')
 
         # Write stdout and stderr to temp files for error capture
-        stdout_file = '/tmp/xray-pilot-xray-stdout.log'
-        stderr_file = '/tmp/xray-pilot-xray-stderr.log'
+        stdout_file = '/tmp/xpilot-xray-stdout.log'
+        stderr_file = '/tmp/xpilot-xray-stderr.log'
 
         with open(stdout_file, 'w') as stdout_f, open(stderr_file, 'w') as stderr_f:
             self._process = subprocess.Popen(

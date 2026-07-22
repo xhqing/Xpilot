@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Test proxy access to YouTube and other sites."""
+"""Manual proxy reachability check — NOT a pytest test case.
+
+This script is meant to be run directly after starting the proxy, to verify
+that traffic actually flows through SOCKS5/HTTP inbounds to the target sites::
+
+    python tests/proxy_access_check.py
+    # or with custom host/ports:
+    PROXY_HOST=127.0.0.1 SOCKS_PORT=1080 HTTP_PORT=1087 python tests/proxy_access_check.py
+
+It is intentionally named without a ``test_`` prefix so pytest does not collect
+it: its functions take a plain ``url`` argument for positional use from
+``main()``, not a pytest fixture, which previously caused spurious "fixture
+'url' not found" errors during ``pytest`` collection.
+"""
 
 import sys
 import os

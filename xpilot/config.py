@@ -1,4 +1,4 @@
-"""Configuration management for Xray Pilot."""
+"""Configuration management for xpilot."""
 
 import os
 import json
@@ -19,7 +19,7 @@ class ValidationError(ConfigError):
 
 
 class Config:
-    """Configuration manager for Xray Pilot."""
+    """Configuration manager for xpilot."""
 
     def __init__(self, config_dir: str = None):
         from .utils import get_config_dir
@@ -87,13 +87,13 @@ class Config:
         """Get default routing configuration."""
         return {
             'proxy_list': [
-                'geosite:google',
-                'geosite:youtube',
-                'geosite:openai'
+                'domain:google.com',
+                'domain:github.com',
+                'domain:x.com',
+                'domain:z.ai',
+                'domain:youtube.com'
             ],
             'direct_list': [
-                'geosite:cn',
-                'geoip:cn',
                 'geoip:private'
             ],
             'block_list': [],
@@ -108,7 +108,7 @@ class Config:
             'socks_port': 1080,
             'http_port': 1087,
             'log_level': 'warning',
-            'log_file': '/tmp/xray-pilot.log',
+            'log_file': '/tmp/xpilot.log',
             'auto_switch': {
                 'enabled': False,
                 'interval': 300,

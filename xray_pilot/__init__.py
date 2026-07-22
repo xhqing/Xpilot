@@ -1,3 +1,0 @@
-"""Xray Pilot - A CLI proxy toolkit with xray backend."""
-
-__version__ = '0.1.0'

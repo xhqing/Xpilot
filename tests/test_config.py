@@ -5,7 +5,7 @@ import os
 import tempfile
 import pytest
 
-from xray_pilot.config import Config, ConfigError, ValidationError
+from xpilot.config import Config, ConfigError, ValidationError
 
 
 @pytest.fixture

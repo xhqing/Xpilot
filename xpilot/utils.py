@@ -1,4 +1,4 @@
-"""Utility functions for Xray Pilot."""
+"""Utility functions for xpilot."""
 
 import os
 import sys
@@ -13,10 +13,24 @@ logger = logging.getLogger(__name__)
 
 
 def get_config_dir() -> str:
-    """Get the default config directory path."""
-    # Use project's config/ directory (relative to project root)
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    config_dir = os.path.join(project_root, 'config')
+    """Get the default config directory path.
+
+    Follows XDG conventions: ``$XDG_CONFIG_HOME/xpilot`` when set, falling
+    back to ``~/.config/xpilot`` on macOS/Linux and
+    ``%APPDATA%/xpilot`` on Windows. Keeping user configuration out of the
+    source tree means it survives ``pip install -e .`` and project upgrades,
+    and matches what the README documents. The directory is still overridable
+    via the ``PROXY_TOOLKIT_CONFIG_DIR`` environment variable handled in
+    :class:`xpilot.config.Config`.
+    """
+    xdg = os.environ.get('XDG_CONFIG_HOME')
+    if xdg:
+        base = xdg
+    elif sys.platform == 'win32':
+        base = os.environ.get('APPDATA') or os.path.expanduser('~/.config')
+    else:
+        base = os.path.expanduser('~/.config')
+    config_dir = os.path.join(base, 'xpilot')
     os.makedirs(config_dir, exist_ok=True)
     return config_dir
 
@@ -126,12 +140,23 @@ def _get_bypass_domains(bypass_local: bool) -> list:
 
 
 def generate_node_id(name: str, existing_ids: set = None) -> str:
-    """Generate a unique node ID from name."""
+    """Generate a unique node ID from name.
+
+    Non-ASCII characters (e.g. Chinese) are turned into a single separator,
+    consecutive separators are collapsed, and leading/trailing ones stripped.
+    When the name contains no ASCII alphanumerics at all (so the cleaned
+    result would be empty), a short deterministic hash of the original name is
+    used instead — e.g. ``日本节点`` becomes ``node_3f2a1b`` rather than an
+    unreadable ``____``. The hash is derived from the name, so re-adding the
+    same name yields a stable, predictable ID.
+    """
     import re
-    import uuid
+    import hashlib
     base_id = re.sub(r'[^a-zA-Z0-9_-]', '_', name.lower())
+    base_id = re.sub(r'_+', '_', base_id).strip('_')
     if not base_id:
-        base_id = 'node'
+        digest = hashlib.md5(name.encode('utf-8')).hexdigest()[:6]
+        base_id = f'node_{digest}'
     if existing_ids is None:
         return base_id
     node_id = base_id

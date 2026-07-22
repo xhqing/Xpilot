@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name='xray-pilot',
+    name='xpilot',
     version='0.1.0',
     description='A CLI proxy toolkit with xray backend',
     packages=find_packages(),
@@ -14,7 +14,7 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'xray-pilot=xray_pilot.cli:cli',
+            'xpilot=xpilot.cli:cli',
             'dev-proxy=dev.dev_proxy:main',
         ],
     },

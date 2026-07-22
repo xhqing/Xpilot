@@ -1,4 +1,4 @@
-"""Subscription parsing for Xray Pilot."""
+"""Subscription parsing for xpilot."""
 
 import base64
 import json
@@ -18,7 +18,7 @@ def fetch(url: str) -> str:
     import requests
     try:
         resp = requests.get(url, timeout=30, headers={
-            'User-Agent': 'XrayPilot/0.1.0'
+            'User-Agent': 'xpilot/0.1.0'
         })
         resp.raise_for_status()
         return resp.text

@@ -2,8 +2,8 @@
 
 import pytest
 
-from xray_pilot.config import Config
-from xray_pilot.node_manager import (
+from xpilot.config import Config
+from xpilot.node_manager import (
     NodeManager, NodeExistsError, NodeNotFoundError, ExportError
 )
 

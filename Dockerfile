@@ -20,4 +20,4 @@ RUN pip install --no-cache-dir -e . && \
     pip install --no-cache-dir pytest ruff
 
 # Default command
-CMD ["xray-pilot", "--help"]
+CMD ["xpilot", "--help"]
