@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/logo.svg" alt="xpilot logo" width="380">
+  <img src="assets/logo.svg" alt="XPilot logo" width="380">
 
   <p>
     <a href="LICENSE.md"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
@@ -9,8 +9,6 @@
     <img src="https://img.shields.io/badge/Type-Project-lightgrey" alt="Type: Project">
   </p>
 </div>
-
-# xpilot
 
 [简体中文](README_cn.md) | English
 
