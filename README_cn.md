@@ -8,9 +8,13 @@
     <img src="https://img.shields.io/badge/Built%20with-Claude%20Code-19C37D" alt="Built with Claude Code">
     <img src="https://img.shields.io/badge/Type-Project-lightgrey" alt="Type: Project">
   </p>
-</div>
 
-[English](README.md) | 简体中文
+  <p>
+    <a href="README.md">English</a>
+    &nbsp;|&nbsp;
+    简体中文
+  </p>
+</div>
 
 一个方便使用 [Xray](https://github.com/XTLS/Xray-core) 的 Python 命令行框架，把节点管理、服务控制、健康检查、自动切换和路由规则等日常操作封装成一条条简单命令，免去直接手写 Xray 配置的繁琐。（xpilot 即「x-ray pilot」，Xray 的驾驶工具。）
 

@@ -8,9 +8,13 @@
     <img src="https://img.shields.io/badge/Built%20with-Claude%20Code-19C37D" alt="Built with Claude Code">
     <img src="https://img.shields.io/badge/Type-Project-lightgrey" alt="Type: Project">
   </p>
-</div>
 
-[简体中文](README_cn.md) | English
+  <p>
+    <a href="README_cn.md">简体中文</a>
+    &nbsp;|&nbsp;
+    English
+  </p>
+</div>
 
 A Python command-line framework that makes [Xray](https://github.com/XTLS/Xray-core) easy to use. It wraps everyday operations — node management, service control, health checks, automatic switching, and routing rules — into simple commands, saving you from hand-writing Xray configuration. (The name xpilot stands for "x-ray pilot" — a pilot for Xray.)
 
